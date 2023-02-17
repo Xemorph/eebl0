@@ -5,7 +5,7 @@
 <p align="center"> </p>
 
 <div align="center">
-  <a href="https://github.com/Xemorph/eebl0/blob/master/README.md#1-support">
+  <a href="https://github.com/Xemorph/eebl0/blob/main/README.md#1-support">
     <img height="22px" src="assets/os-shield.jpg">
   </a>
 </div>
@@ -20,6 +20,8 @@
 
 - [1. Support](#1-support)
 - [2. Usage](#2-usage)
+  - [2.1 Interface](#2-1-interface)
+  - [2.2 Example](#2-2-example)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -27,7 +29,28 @@
 The library has been created for the most platforms but uses internally the library RS232 which needs to be compiled for your platform.
 
 ## 2. Usage
-Example:
+### 2.1 Interface
+```c
+[...]
+
+struct EEBL0;
+
+struct EEBL0 * EEBL0_create(void);
+void EEBL0_free(struct EEBL0 ** self);
+
+void EEBL0_setPort(struct EEBL0 * self, const char * const port);
+const char * const EEBL0_getPort(struct EEBL0 * self);
+
+const char * const EEBL0_welcome(void);
+const char * const EEBL0_getStatus(struct EEBL0 * self);
+
+bool EEBL0_connect(struct EEBL0 * self);
+void EEBL0_disconnect(struct EEBL0 * self);
+bool EEBL0_erase(struct EEBL0 * self);
+
+[...]
+```
+### 2.2 Example
 ```c
 #include <eebl0/eebl0.h>
 
