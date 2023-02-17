@@ -1,4 +1,4 @@
-#include "eebl0.h"
+#include "eebl0/eebl0.h"
 #include <stdlib.h>
 #include <string.h>
 #include <rs232/rs_232.h>
@@ -92,7 +92,7 @@ bool EEBL0_connect(struct EEBL0 * self) {
         self->status = EEBL0_STATUS_FAILURE;
         return (false);
     }
-    
+
     self->status = EEBL0_STATUS_CONNECTED;
     return (true);
 }
