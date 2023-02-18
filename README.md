@@ -1,4 +1,4 @@
-<p align="center"><img width=50% src="./assets/elmorlabs_logo.png"></p>
+<p align="center"><a href="https://elmorlabs.com/"><img width=50% src="./assets/elmorlabs_logo.png"></a></p>
 
 <h4 align="center">A simple yet easy to use C-library to flash specific MCUs</h4>
 
@@ -20,8 +20,8 @@
 
 - [1. Support](#1-support)
 - [2. Usage](#2-usage)
-  - [2.1 Interface](#2-1-interface)
-  - [2.2 Example](#2-2-example)
+  - [2.1 Interface](#21-interface)
+  - [2.2 Example](#22-example)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
