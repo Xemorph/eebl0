@@ -1,4 +1,10 @@
 #include "eebl0/eebl0.h"
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <rs232/rs_232.h>
@@ -7,7 +13,7 @@
 #define LOG_ERROR_IF_FOUND(x) \
     do \
     { \
-        if (eebl0->cb_log != NULL) eebl0->cb_log((x)); \
+        if (self->cb_log != NULL) self->cb_log((x)); \
     } while (0)
 
 static const char * const _WELCOME = "EEBL0";
@@ -15,10 +21,20 @@ static const char * const _READABLE_STATUS[] = {
     "CONNECTING", "CONNECTED", "DISCONNECTING", "DISCONNECTED", "FAILURE"
 };
 
+bool __load_and_pad_firmware(struct EEBL0 * self, const char * const fw);
+
 struct EEBL0 {
+    // Port name
     char * port;
+    // Underlying port id of 'port'
     int    port_id;
+    // Current status of the connection
     int    status;
+    // Firmware
+    uint8_t * fw;
+    // Size of the raw (binary) firmware data
+    size_t fw_sz;
+    // Callback log function
     void (*cb_log)(int code);
 };
 
@@ -50,6 +66,7 @@ struct EEBL0 * EEBL0_create(void (*cb_log)(int code)) {
 
     memset(eebl0, 0, sizeof(*eebl0));
     eebl0->port_id = INT_MIN;
+    eebl0->fw_sz = INT_MIN;
     eebl0->status = EEBL0_STATUS_DISCONNECTED;
     // Hook the logging mechanism if available
     if (cb_log != NULL) eebl0->cb_log = cb_log;
@@ -60,7 +77,7 @@ struct EEBL0 * EEBL0_create(void (*cb_log)(int code)) {
 
 void EEBL0_free(struct EEBL0 ** self) {
     if (self == NULL || *self == NULL) {
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EF_NULL_INPUT);
+        //LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EF_NULL_INPUT);
         return;
     }
 
@@ -68,6 +85,11 @@ void EEBL0_free(struct EEBL0 ** self) {
     if ((*self)->port) {
         free((*self)->port);
         (*self)->port = NULL;
+    }
+
+    if ((*self)->fw) {
+        free((*self)->fw);
+        (*self)->fw = NULL;
     }
 
     free(*self);
@@ -98,16 +120,16 @@ void EEBL0_setPort(struct EEBL0 * self, const char * const port) {
 const char * const EEBL0_getPort(struct EEBL0 * self) {
     if (self == NULL) {
         LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EGP_NULL_INPUT);
-        return;
+        return NULL;
     }
 
     return((const char * const)self->port);
 }
 
-bool EEBL0_connect(struct EEBL0 * self) {
+bool EEBL0_connectToDevice(struct EEBL0 * self) {
     if (self == NULL) {
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EC_NULL_INPUT);
-        return;
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_ECTD_NULL_INPUT);
+        return (false);
     }
 
         self->status  = EEBL0_STATUS_CONNECTING;
@@ -122,7 +144,7 @@ bool EEBL0_connect(struct EEBL0 * self) {
 
     if (RS232_OpenComport(self->port_id, bdrate, &mode[0], 0) != 0) {
         self->status = EEBL0_STATUS_FAILURE;
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EC_RS232OPEN_FAIL);
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_ECTD_RS232OPEN_FAIL);
         return (false);
     }
 
@@ -144,10 +166,19 @@ void EEBL0_disconnect(struct EEBL0 * self) {
     }
 }
 
-bool EEBL0_erase(struct EEBL0 * self) {
+bool EEBL0_setAndLoadFirmware(struct EEBL0 * self, const char * const fw_location) {
+    if (self == NULL || fw_location == NULL) {
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_ESALFW_NULL_INPUT);
+        return (false);
+    }
+
+    return (__load_and_pad_firmware(self, fw_location));
+}
+
+bool EEBL0_eraseFirmware(struct EEBL0 * self) {
     if (self == NULL) {
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EE_NULL_INPUT);
-        return;
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EEFW_NULL_INPUT);
+        return (false);
     }
 
     if (self->status != EEBL0_STATUS_CONNECTED) {
@@ -157,48 +188,45 @@ bool EEBL0_erase(struct EEBL0 * self) {
     uint8_t rx;
     int bWritten = RS232_SendByte(self->port_id, EEBL0_UART_CMD_ERASE);
     if (bWritten == -1 || bWritten == 0) {
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EE_RS232SEND_FAIL);
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EEFW_RS232SEND_FAIL);
         return (false);
     }
 
     int bRead = RS232_PollComport(self->port_id, &rx, 1);
     if (bRead == -1) {
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EE_RS232READ_FAIL);
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EEFW_RS232READ_FAIL);
         return (false);
     }
 
     return (rx == (uint8_t)'s');
 }
 
-bool EEBL0_verfiy(struct EEBL0 * self, const uint8_t * const data, size_t data_sz) {
-    if (self == NULL || data == NULL || data_sz <= 0) {
-        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EV_NULL_INPUT);
+bool EEBL0_verfiyFirmware(struct EEBL0 * self) {
+    if (self == NULL) {
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EVFW_NULL_INPUT);
         return (false);
     }
 
-    // Require 16K-1K-256B sized firmware
-    uint8_t bfr[15104];
+    if (self->fw == NULL || self->fw_sz <= 0) {
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EVFW_FMW_NF);
+        return (false);
+    }
+
+    // Read buffer
     uint8_t rx[65];
-
-    int j;
-    for (j = data_sz; j < data_sz; j++)
-        bfr[j] = 0xFF;
-
-    memcpy(&bfr[0], data, data_sz > 15104 ? 15104 : data_sz);
-
     // Page firmware
     int page;
     for (page = 0; page < 15104 / 64; page++) {
         // Verify
         int bWritten = RS232_SendByte(self->port_id, EEBL0_UART_CMD_VERIFY_PAGE);
         if (bWritten == -1 || bWritten == 0) {
-            LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EV_RS232SEND_FAIL);
+            LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EVFW_RS232SEND_FAIL);
             return (false);
         }
 
-        int bRead = RS232_PollComport(self->port_id, &rx, 65);
+        int bRead = RS232_PollComport(self->port_id, &rx[0], 65);
         if (bRead == -1) {
-            LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EV_RS232READ_FAIL);
+            LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_EVFW_RS232READ_FAIL);
             return (false);
         }
         if (rx[0] != (uint8_t)'s') {
@@ -208,7 +236,7 @@ bool EEBL0_verfiy(struct EEBL0 * self, const uint8_t * const data, size_t data_s
         // Compare page
         int y;
         for(int y = 0; y < 64; y++) {
-            if(bfr[page * 64 + y] != rx[y + 1]) {
+            if(self->fw[page * 64 + y] != rx[y + 1]) {
                 return (false);
             }
         }
@@ -216,3 +244,51 @@ bool EEBL0_verfiy(struct EEBL0 * self, const uint8_t * const data, size_t data_s
 
     return (true);
 }
+
+//#if defined(__linux__) || defined(__FreeBSD__)
+//bool __load_and_pad_firmware(struct EEBL0 * self, const char * const fw) {
+//    struct stat _fw_stats;
+//    fstat(fd, &_fw_stats);
+//    long int _fw_sz = _fw_stats.st_size;
+//
+//    return (true);
+//}
+//#else
+bool __load_and_pad_firmware(struct EEBL0 * self, const char * const fw) {
+    // Read file statistics
+    struct _stat _fw_stats;
+    int rc = _stat(fw, &_fw_stats);
+    if (rc) {
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_SYSSTAT_STAT_FAIL);
+        return (false);
+    }
+    // Firmware size through file statistics
+    long int _fw_sz = _fw_stats.st_size;
+
+    // TODO: C-Standard functions are fine but OS-specific functions are faster
+    //       and better. So ... Use OS-specific functions!
+    // Open file
+    FILE * _fw = fopen(fw, "rb");
+    if (_fw == NULL) {
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_FOPEN_FAIL);
+        return (false);
+    }
+
+    // Require 16K-1K-256B sized firmware
+    self->fw = (uint8_t *)malloc( (self->fw_sz = sizeof(*(self->fw)) * 15104) );
+    if (fw == NULL) {
+        LOG_ERROR_IF_FOUND(EEBL0_ERROR_CBLOG_STDLIB_MALLOC_FAIL);
+        return (false);
+    }
+    // Pad firmware if required
+    int j;
+    for (j = _fw_sz; j < self->fw_sz; j++)
+        self->fw[j] = 0xFF;
+    // Load firmware from file to allocated memory
+    fread(self->fw, _fw_sz > self->fw_sz ? self->fw_sz : _fw_sz, 1, _fw);
+    // Close file
+    fclose(_fw);
+
+    return (true);
+}
+//#endif
